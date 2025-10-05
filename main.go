@@ -1,0 +1,112 @@
+// Command since tracks how long it has been since something last happened.
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"runtime/debug"
+	"time"
+)
+
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
+const usageText = `since - how long has it been?
+
+Usage:
+  since mark NAME    record that NAME happened just now
+  since NAME         show how long ago NAME last happened
+  since [ls]         list all events, most recent first
+
+Flags:
+  -h, --help         show this help
+  --version          print the version
+
+Events are stored in $SINCE_FILE, or $XDG_DATA_HOME/since/events.json
+(default ~/.local/share/since/events.json).
+`
+
+// app holds everything a command needs from the outside world, so tests can
+// swap in buffers, a fixed clock and a fake environment.
+type app struct {
+	stdout io.Writer
+	stderr io.Writer
+	now    func() time.Time
+	loc    *time.Location
+	getenv func(string) string
+}
+
+func main() {
+	a := &app{
+		stdout: os.Stdout,
+		stderr: os.Stderr,
+		now:    time.Now,
+		loc:    time.Local,
+		getenv: os.Getenv,
+	}
+	os.Exit(a.run(os.Args[1:]))
+}
+
+// usageError reports a bad invocation; it exits with status 2.
+type usageError struct{ msg string }
+
+func (e usageError) Error() string { return e.msg }
+
+func usagef(format string, args ...any) error {
+	return usageError{fmt.Sprintf(format, args...)}
+}
+
+// run executes the command line and returns the process exit status.
+func (a *app) run(args []string) int {
+	opts, pos, err := parseArgs(args)
+	if err == nil {
+		err = a.dispatch(opts, pos)
+	}
+	if err == nil {
+		return 0
+	}
+	fmt.Fprintf(a.stderr, "since: %v\n", err)
+	var ue usageError
+	if errors.As(err, &ue) {
+		fmt.Fprintln(a.stderr, "Run 'since --help' for usage.")
+		return 2
+	}
+	return 1
+}
+
+func (a *app) dispatch(o options, pos []string) error {
+	if o.help {
+		fmt.Fprint(a.stdout, usageText)
+		return nil
+	}
+	if o.version {
+		fmt.Fprintln(a.stdout, "since", buildVersion())
+		return nil
+	}
+	if len(pos) == 0 {
+		return a.cmdList(o, nil)
+	}
+	switch cmd, rest := pos[0], pos[1:]; cmd {
+	case "ls", "list":
+		return a.cmdList(o, rest)
+	case "mark":
+		return a.cmdMark(o, rest)
+	case "help":
+		fmt.Fprint(a.stdout, usageText)
+		return nil
+	default:
+		return a.cmdShow(o, pos)
+	}
+}
+
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
+}
