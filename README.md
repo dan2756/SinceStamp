@@ -19,10 +19,31 @@ go install github.com/dan2756/since@latest
 ## Usage
 
 ```
-since mark NAME    record that NAME happened just now
-since NAME         show how long ago NAME last happened
-since [ls]         list all events, most recent first
+since mark NAME [--at WHEN] [--note TEXT]   record that NAME happened
+since NAME                                  how long ago NAME last happened
+since [ls]                                  all events, most recent first
+since log NAME                              history of NAME with intervals
 ```
+
+`--at` takes a time in the past, in any of these forms:
+
+| Form                          | Meaning                                 |
+|-------------------------------|-----------------------------------------|
+| `3h`, `90m`, `1d2h`, `3h ago` | that long ago                           |
+| `15:04`                       | today at 15:04 (yesterday if not yet)   |
+| `"2026-01-02 15:04"`          | local date and time                     |
+| `2026-01-02T15:04:05Z`        | RFC 3339, any offset                    |
+
+```
+$ since mark coffee --at 40m --note "flat white"
+$ since log coffee
+coffee: 3 marks, last 40m ago, every 4h 2m on average
+  Mon 2026-01-05 01:08
+  Mon 2026-01-05 05:10  +4h 2m
+  Mon 2026-01-05 09:12  +4h 2m  flat white
+```
+
+The last 100 marks of each event are kept.
 
 Events are kept in `$XDG_DATA_HOME/since/events.json`
 (`~/.local/share/since/events.json` by default). Set `SINCE_FILE` to use a

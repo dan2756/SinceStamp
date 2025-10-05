@@ -40,6 +40,45 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMarkKeepsHistorySortedAndCapped(t *testing.T) {
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	d := newData()
+	for i := range maxMarks + 5 {
+		d.Mark("tea", Mark{At: base.Add(time.Duration(i) * time.Minute)})
+	}
+	// An older mark lands in the middle, a duplicate time goes after its twin.
+	d.Mark("tea", Mark{At: base.Add(50*time.Minute + 30*time.Second), Note: "late entry"})
+	d.Mark("tea", Mark{At: base.Add(60 * time.Minute), Note: "twin"})
+
+	e := d.Events["tea"]
+	if e.Count != maxMarks+7 {
+		t.Errorf("count = %d, want %d", e.Count, maxMarks+7)
+	}
+	if len(e.Marks) != maxMarks {
+		t.Fatalf("kept %d marks, want %d", len(e.Marks), maxMarks)
+	}
+	for i := 1; i < len(e.Marks); i++ {
+		if e.Marks[i].At.Before(e.Marks[i-1].At) {
+			t.Fatalf("marks out of order at %d: %v before %v", i, e.Marks[i].At, e.Marks[i-1].At)
+		}
+	}
+	if want := base.Add(7 * time.Minute); !e.Marks[0].At.Equal(want) {
+		t.Errorf("oldest kept = %v, want %v", e.Marks[0].At, want)
+	}
+	var notes []string
+	for _, m := range e.Marks {
+		if m.Note != "" {
+			notes = append(notes, m.Note)
+		}
+		if m.At.Equal(base.Add(60*time.Minute)) && m.Note == "" && len(notes) == 2 {
+			t.Error("a mark with the same time should be inserted after the existing one")
+		}
+	}
+	if !reflect.DeepEqual(notes, []string{"late entry", "twin"}) {
+		t.Errorf("notes = %v", notes)
+	}
+}
+
 func TestStoreLoadMissingOrEmpty(t *testing.T) {
 	s := tempStore(t)
 	d, err := s.Load()

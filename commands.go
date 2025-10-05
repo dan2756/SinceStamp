@@ -48,20 +48,34 @@ func notFound(name string) error {
 	return fmt.Errorf("no event named %q (see 'since ls')", name)
 }
 
+func plural(n int, word string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, word)
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
 func (a *app) cmdMark(o options, args []string) error {
 	if len(args) != 1 {
-		return usagef("usage: since mark NAME")
+		return usagef("usage: since mark NAME [--at WHEN] [--note TEXT]")
 	}
 	name := args[0]
 	if err := validName(name); err != nil {
 		return err
 	}
+	now := a.now()
+	at := now
+	if o.atSet {
+		var err error
+		if at, err = parseWhen(o.at, now, a.loc); err != nil {
+			return usagef("--at: %v", err)
+		}
+	}
 	s, err := a.store()
 	if err != nil {
 		return err
 	}
-	now := a.now()
-	m := Mark{At: now.Truncate(time.Second).UTC()}
+	m := Mark{At: at.Truncate(time.Second).UTC(), Note: o.note}
 	var prev *Mark
 	err = s.Update(func(d *Data) error {
 		if e := d.Events[name]; e != nil {
@@ -137,6 +151,50 @@ func (a *app) cmdList(o options, args []string) error {
 	for _, name := range names {
 		pad := strings.Repeat(" ", width-utf8.RuneCountInString(name))
 		fmt.Fprintf(a.stdout, "%s%s  %s\n", name, pad, relative(now.Sub(d.Events[name].Last().At)))
+	}
+	return nil
+}
+
+func (a *app) cmdLog(o options, args []string) error {
+	if len(args) != 1 {
+		return usagef("usage: since log NAME")
+	}
+	name := args[0]
+	d, err := a.load()
+	if err != nil {
+		return err
+	}
+	e := d.Events[name]
+	if e == nil {
+		return notFound(name)
+	}
+	now := a.now()
+
+	header := name + ": " + plural(e.Count, "mark")
+	if e.Count > len(e.Marks) {
+		header += fmt.Sprintf(" (showing the last %d)", len(e.Marks))
+	}
+	header += ", last " + relative(now.Sub(e.Last().At))
+	if avg, ok := e.AverageInterval(); ok {
+		header += ", every " + formatDuration(avg) + " on average"
+	}
+	fmt.Fprintln(a.stdout, header)
+
+	intervals := make([]string, len(e.Marks))
+	width := 0
+	for i, iv := range e.Intervals() {
+		intervals[i+1] = "+" + formatDuration(iv)
+		width = max(width, len(intervals[i+1]))
+	}
+	for i, m := range e.Marks {
+		line := "  " + m.At.In(a.loc).Format("Mon 2006-01-02 15:04")
+		if width > 0 {
+			line += "  " + intervals[i] + strings.Repeat(" ", width-len(intervals[i]))
+		}
+		if m.Note != "" {
+			line += "  " + m.Note
+		}
+		fmt.Fprintln(a.stdout, strings.TrimRight(line, " "))
 	}
 	return nil
 }

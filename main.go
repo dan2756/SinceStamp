@@ -16,13 +16,20 @@ var version = "dev"
 const usageText = `since - how long has it been?
 
 Usage:
-  since mark NAME    record that NAME happened just now
+  since mark NAME [--at WHEN] [--note TEXT]
+                     record that NAME happened (just now, unless --at says otherwise)
   since NAME         show how long ago NAME last happened
   since [ls]         list all events, most recent first
+  since log NAME     show the history of NAME with the time between marks
 
 Flags:
+  --at WHEN          when it happened: 3h (ago), 1d2h, 15:04, "2026-01-02 15:04",
+                     or RFC 3339 such as 2026-01-02T15:04:05Z
+  --note TEXT        attach a note to the mark
   -h, --help         show this help
   --version          print the version
+
+The last 100 marks of each event are kept.
 
 Events are stored in $SINCE_FILE, or $XDG_DATA_HOME/since/events.json
 (default ~/.local/share/since/events.json).
@@ -86,13 +93,19 @@ func (a *app) dispatch(o options, pos []string) error {
 		return nil
 	}
 	if len(pos) == 0 {
-		return a.cmdList(o, nil)
+		pos = []string{"ls"}
 	}
-	switch cmd, rest := pos[0], pos[1:]; cmd {
+	cmd, rest := pos[0], pos[1:]
+	if (o.atSet || o.noteSet) && cmd != "mark" {
+		return usagef("--at and --note only apply to mark")
+	}
+	switch cmd {
 	case "ls", "list":
 		return a.cmdList(o, rest)
 	case "mark":
 		return a.cmdMark(o, rest)
+	case "log":
+		return a.cmdLog(o, rest)
 	case "help":
 		fmt.Fprint(a.stdout, usageText)
 		return nil

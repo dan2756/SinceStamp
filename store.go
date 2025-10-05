@@ -14,12 +14,17 @@ import (
 
 // Mark is a single occurrence of an event.
 type Mark struct {
-	At time.Time `json:"at"`
+	At   time.Time `json:"at"`
+	Note string    `json:"note,omitempty"`
 }
+
+// maxMarks is how much history is kept per event.
+const maxMarks = 100
 
 // Event is the recorded history of one named event.
 type Event struct {
-	// Count is the total number of marks ever recorded.
+	// Count is the total number of marks ever recorded. Only the newest
+	// maxMarks are kept, so it can be larger than len(Marks).
 	Count int `json:"count"`
 	// Marks holds the history, oldest first. It is never empty.
 	Marks []Mark `json:"marks"`
@@ -27,6 +32,26 @@ type Event struct {
 
 // Last returns the most recent mark.
 func (e *Event) Last() Mark { return e.Marks[len(e.Marks)-1] }
+
+// Intervals returns the time between each mark and the one before it, so
+// it has one entry fewer than Marks.
+func (e *Event) Intervals() []time.Duration {
+	var out []time.Duration
+	for i := 1; i < len(e.Marks); i++ {
+		out = append(out, e.Marks[i].At.Sub(e.Marks[i-1].At))
+	}
+	return out
+}
+
+// AverageInterval is the mean time between consecutive marks in the kept
+// history. It reports false when there are fewer than two marks.
+func (e *Event) AverageInterval() (time.Duration, bool) {
+	n := len(e.Marks)
+	if n < 2 {
+		return 0, false
+	}
+	return e.Marks[n-1].At.Sub(e.Marks[0].At) / time.Duration(n-1), true
+}
 
 // Data is the document stored in the events file.
 type Data struct {
@@ -40,7 +65,9 @@ func newData() *Data {
 	return &Data{Version: dataVersion, Events: map[string]*Event{}}
 }
 
-// Mark records m under name, creating the event if needed.
+// Mark records m under name, creating the event if needed. Marks may arrive
+// out of order (with --at) and are slotted into place; once the history is
+// longer than maxMarks the oldest entries are dropped.
 func (d *Data) Mark(name string, m Mark) *Event {
 	e := d.Events[name]
 	if e == nil {
@@ -48,8 +75,21 @@ func (d *Data) Mark(name string, m Mark) *Event {
 		d.Events[name] = e
 	}
 	e.Count++
-	e.Marks = append(e.Marks, m)
+	i, _ := slices.BinarySearchFunc(e.Marks, m.At, func(x Mark, t time.Time) int {
+		if x.At.After(t) {
+			return 1
+		}
+		return -1
+	})
+	e.Marks = slices.Insert(e.Marks, i, m)
+	e.trim()
 	return e
+}
+
+func (e *Event) trim() {
+	if extra := len(e.Marks) - maxMarks; extra > 0 {
+		e.Marks = slices.Delete(e.Marks, 0, extra)
+	}
 }
 
 // normalize repairs a document that may have been edited by hand: marks are
@@ -64,6 +104,7 @@ func (d *Data) normalize() {
 			continue
 		}
 		slices.SortStableFunc(e.Marks, func(a, b Mark) int { return a.At.Compare(b.At) })
+		e.trim()
 		e.Count = max(e.Count, len(e.Marks))
 	}
 }

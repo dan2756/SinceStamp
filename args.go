@@ -7,10 +7,16 @@ import "strings"
 type options struct {
 	help    bool
 	version bool
+
+	at      string
+	atSet   bool
+	note    string
+	noteSet bool
 }
 
 // parseArgs splits args into flags and positional arguments. Both -flag and
-// --flag spellings are accepted; "--" ends flag parsing.
+// --flag spellings are accepted, values can be given as "--at 3h" or
+// "--at=3h", and "--" ends flag parsing.
 func parseArgs(args []string) (options, []string, error) {
 	var o options
 	var pos []string
@@ -25,14 +31,38 @@ func parseArgs(args []string) (options, []string, error) {
 			continue
 		}
 		name := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
+		name, value, hasValue := strings.Cut(name, "=")
+
+		switch name {
+		case "at", "note":
+			if !hasValue {
+				if i+1 >= len(args) {
+					return o, nil, usagef("flag --%s needs a value", name)
+				}
+				i++
+				value = args[i]
+			}
+			if name == "at" {
+				o.at, o.atSet = value, true
+			} else {
+				o.note, o.noteSet = value, true
+			}
+			continue
+		}
+
+		var flag *bool
 		switch name {
 		case "h", "help":
-			o.help = true
+			flag = &o.help
 		case "version":
-			o.version = true
+			flag = &o.version
 		default:
 			return o, nil, usagef("unknown flag %s", arg)
 		}
+		if hasValue {
+			return o, nil, usagef("flag --%s doesn't take a value", name)
+		}
+		*flag = true
 	}
 	return o, pos, nil
 }

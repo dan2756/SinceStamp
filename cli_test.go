@@ -68,6 +68,25 @@ func TestShowAfterMark(t *testing.T) {
 	}
 }
 
+func TestMarkAt(t *testing.T) {
+	ta := newTestApp(t)
+	if got, want := ta.must("mark", "coffee", "--at", "3h"), "marked coffee (Mon Jan 5 06:12)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := ta.must("coffee"), "coffee: 3h ago (Mon Jan 5 06:12)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	ta.advance(2*time.Hour + 14*time.Minute)
+	got := ta.must("mark", "coffee", "--note=second cup")
+	if want := "marked coffee (Mon Jan 5 11:26); previous was 5h 14m earlier\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	ta.must("mark", "coffee", "--at", "2025-12-31T23:00:00Z")
+	if got, want := ta.must("coffee"), "coffee: just now (Mon Jan 5 11:26)\n"; got != want {
+		t.Errorf("an older --at should not become the latest mark: got %q", got)
+	}
+}
+
 func TestShowUnknownEvent(t *testing.T) {
 	ta := newTestApp(t)
 	code, out := ta.run("tea")
@@ -108,6 +127,10 @@ func TestUsageErrors(t *testing.T) {
 		{"mark", "a", "b"},
 		{"--bogus"},
 		{"ls", "extra"},
+		{"mark", "x", "--at"},
+		{"mark", "x", "--at", "whenever"},
+		{"coffee", "--note", "hi"},
+		{"--help=yes"},
 	} {
 		if code, _ := ta.run(args...); code != 2 {
 			t.Errorf("since %v: exit %d, want 2", args, code)
