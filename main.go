@@ -19,13 +19,20 @@ Usage:
   since mark NAME [--at WHEN] [--note TEXT]
                      record that NAME happened (just now, unless --at says otherwise)
   since NAME         show how long ago NAME last happened
+  since show NAME    the same, for names that clash with a subcommand
   since [ls]         list all events, most recent first
   since log NAME     show the history of NAME with the time between marks
+  since rm NAME...   delete events and their history
+  since rename OLD NEW
+                     rename an event
 
 Flags:
   --at WHEN          when it happened: 3h (ago), 1d2h, 15:04, "2026-01-02 15:04",
                      or RFC 3339 such as 2026-01-02T15:04:05Z
   --note TEXT        attach a note to the mark
+  --json             print JSON (show, ls, log and mark)
+  --short            compact durations: 2h14m
+  --seconds          durations as whole seconds
   -h, --help         show this help
   --version          print the version
 
@@ -104,8 +111,14 @@ func (a *app) dispatch(o options, pos []string) error {
 		return a.cmdList(o, rest)
 	case "mark":
 		return a.cmdMark(o, rest)
+	case "show":
+		return a.cmdShow(o, rest)
 	case "log":
 		return a.cmdLog(o, rest)
+	case "rm":
+		return a.cmdRemove(o, rest)
+	case "rename", "mv":
+		return a.cmdRename(o, rest)
 	case "help":
 		fmt.Fprint(a.stdout, usageText)
 		return nil

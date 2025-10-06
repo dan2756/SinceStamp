@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -94,5 +95,67 @@ func TestLogUnknownEvent(t *testing.T) {
 	ta := newTestApp(t)
 	if code, _ := ta.run("log", "nope"); code != 1 {
 		t.Errorf("exit = %d, want 1", code)
+	}
+}
+
+func TestLogJSON(t *testing.T) {
+	ta := newTestApp(t)
+	ta.clock = time.Date(2026, 1, 5, 11, 26, 0, 0, testZone)
+	ta.must("mark", "coffee", "--at", "2026-01-05 05:10")
+	ta.must("mark", "coffee", "--at", "07:00")
+	ta.must("mark", "coffee", "--at", "09:12", "--note", "decaf")
+
+	var got logJSON
+	if err := json.Unmarshal([]byte(ta.must("log", "coffee", "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "coffee" || got.Count != 3 || got.ElapsedSeconds != 8040 || got.Last != "2026-01-05T09:12:00-05:00" {
+		t.Errorf("summary = %+v", got.eventJSON)
+	}
+	if got.AverageIntervalSeconds == nil || *got.AverageIntervalSeconds != 7260 {
+		t.Errorf("average_interval_seconds = %v, want 7260", got.AverageIntervalSeconds)
+	}
+	var intervals []any
+	for _, e := range got.Entries {
+		if e.IntervalSeconds == nil {
+			intervals = append(intervals, nil)
+		} else {
+			intervals = append(intervals, *e.IntervalSeconds)
+		}
+	}
+	if want := []any{nil, int64(6600), int64(7920)}; !reflect.DeepEqual(intervals, want) {
+		t.Errorf("intervals = %v, want %v", intervals, want)
+	}
+	if got.Entries[2].Note != "decaf" || got.Entries[2].At != "2026-01-05T09:12:00-05:00" {
+		t.Errorf("last entry = %+v", got.Entries[2])
+	}
+}
+
+func TestLogJSONSingleMarkHasNullAverage(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "gym")
+	out := ta.must("log", "gym", "--json")
+	if !strings.Contains(out, `"average_interval_seconds": null`) || !strings.Contains(out, `"interval_seconds": null`) {
+		t.Errorf("expected explicit nulls:\n%s", out)
+	}
+}
+
+func TestLogSecondsAndShort(t *testing.T) {
+	ta := newTestApp(t)
+	ta.clock = time.Date(2026, 1, 5, 11, 26, 0, 0, testZone)
+	ta.must("mark", "tea", "--at", "10:00")
+	ta.must("mark", "tea", "--at", "11:00")
+
+	want := "tea: 2 marks, last 26m ago, every 1h on average\n" +
+		"  Mon 2026-01-05 10:00\n" +
+		"  Mon 2026-01-05 11:00  +1h\n"
+	if got := ta.must("log", "tea", "--short"); got != want {
+		t.Errorf("--short:\n%s\nwant:\n%s", got, want)
+	}
+	want = "tea: 2 marks, last 1560s ago, every 3600s on average\n" +
+		"  Mon 2026-01-05 10:00\n" +
+		"  Mon 2026-01-05 11:00  +3600s\n"
+	if got := ta.must("log", "tea", "--seconds"); got != want {
+		t.Errorf("--seconds:\n%s\nwant:\n%s", got, want)
 	}
 }

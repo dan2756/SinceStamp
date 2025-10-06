@@ -25,7 +25,7 @@ func TestFormatDuration(t *testing.T) {
 		{-(2*time.Hour + 14*time.Minute), "2h 14m"},
 	}
 	for _, tt := range tests {
-		if got := formatDuration(tt.d); got != tt.want {
+		if got := formatDuration(tt.d, style{}); got != tt.want {
 			t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
 		}
 	}
@@ -42,8 +42,46 @@ func TestRelative(t *testing.T) {
 		{2*time.Hour + 14*time.Minute, "2h 14m ago"},
 	}
 	for _, tt := range tests {
-		if got := relative(tt.d); got != tt.want {
+		if got := relative(tt.d, style{}); got != tt.want {
 			t.Errorf("relative(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
+
+func TestFormatDurationShort(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{45 * time.Second, "45s"},
+		{2*time.Hour + 14*time.Minute, "2h14m"},
+		{3 * day, "3d"},
+		{year + 6*week, "1y6w"},
+	}
+	for _, tt := range tests {
+		if got := formatDuration(tt.d, style{short: true}); got != tt.want {
+			t.Errorf("formatDuration(%v, short) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+	if got := relative(2*time.Hour+14*time.Minute, style{short: true}); got != "2h14m ago" {
+		t.Errorf("relative short = %q", got)
+	}
+}
+
+func TestSeconds(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want int64
+	}{
+		{0, 0},
+		{1999 * time.Millisecond, 1},
+		{2*time.Hour + 14*time.Minute, 8040},
+		{-1500 * time.Millisecond, -1},
+	}
+	for _, tt := range tests {
+		if got := seconds(tt.d); got != tt.want {
+			t.Errorf("seconds(%v) = %d, want %d", tt.d, got, tt.want)
 		}
 	}
 }

@@ -28,10 +28,15 @@ var units = []unit{
 	{"s", time.Second},
 }
 
+// style controls how durations are written.
+type style struct {
+	short bool // "2h14m" instead of "2h 14m"
+}
+
 // formatDuration renders d using its largest unit and, when non-zero, the
 // unit right below it: "45s", "2h 14m", "3d", "1y 6w". The sign of d is
 // ignored and anything below a second is dropped.
-func formatDuration(d time.Duration) string {
+func formatDuration(d time.Duration, st style) string {
 	if d < 0 {
 		d = -d
 	}
@@ -55,13 +60,22 @@ func formatDuration(d time.Duration) string {
 	if len(parts) == 0 {
 		return "0s"
 	}
-	return strings.Join(parts, " ")
+	sep := " "
+	if st.short {
+		sep = ""
+	}
+	return strings.Join(parts, sep)
 }
 
 // relative describes an elapsed duration: "2h 14m ago", or "just now".
-func relative(d time.Duration) string {
+func relative(d time.Duration, st style) string {
 	if d < time.Second {
 		return "just now"
 	}
-	return formatDuration(d) + " ago"
+	return formatDuration(d, st) + " ago"
+}
+
+// seconds is d in whole seconds, truncated toward zero.
+func seconds(d time.Duration) int64 {
+	return int64(d / time.Second)
 }

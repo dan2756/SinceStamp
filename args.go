@@ -7,6 +7,9 @@ import "strings"
 type options struct {
 	help    bool
 	version bool
+	json    bool
+	short   bool
+	seconds bool
 
 	at      string
 	atSet   bool
@@ -56,6 +59,12 @@ func parseArgs(args []string) (options, []string, error) {
 			flag = &o.help
 		case "version":
 			flag = &o.version
+		case "json":
+			flag = &o.json
+		case "short":
+			flag = &o.short
+		case "seconds":
+			flag = &o.seconds
 		default:
 			return o, nil, usagef("unknown flag %s", arg)
 		}
@@ -65,4 +74,8 @@ func parseArgs(args []string) (options, []string, error) {
 		*flag = true
 	}
 	return o, pos, nil
+}
+
+func (o options) style() style {
+	return style{short: o.short}
 }

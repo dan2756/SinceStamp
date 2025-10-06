@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,6 +36,26 @@ func (a *app) when(t, now time.Time) string {
 	return t.Format("Mon Jan 2 15:04")
 }
 
+func (a *app) rfc3339(t time.Time) string {
+	return t.In(a.loc).Format(time.RFC3339)
+}
+
+// dur formats a duration for prose, honouring --short and --seconds.
+func (o options) dur(d time.Duration) string {
+	if o.seconds {
+		return strconv.FormatInt(seconds(d), 10) + "s"
+	}
+	return formatDuration(d, o.style())
+}
+
+// ago describes how long ago something happened, honouring the output flags.
+func (o options) ago(d time.Duration) string {
+	if o.seconds {
+		return o.dur(d) + " ago"
+	}
+	return relative(d, o.style())
+}
+
 func validName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return usagef("event name can't be empty")
@@ -53,6 +75,44 @@ func plural(n int, word string) string {
 		return fmt.Sprintf("%d %s", n, word)
 	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// eventJSON is the --json form of an event's current state.
+type eventJSON struct {
+	Name           string `json:"name"`
+	Last           string `json:"last"`
+	ElapsedSeconds int64  `json:"elapsed_seconds"`
+	Count          int    `json:"count"`
+	Note           string `json:"note,omitempty"`
+}
+
+type entryJSON struct {
+	At              string `json:"at"`
+	IntervalSeconds *int64 `json:"interval_seconds"`
+	Note            string `json:"note,omitempty"`
+}
+
+type logJSON struct {
+	eventJSON
+	AverageIntervalSeconds *int64      `json:"average_interval_seconds"`
+	Entries                []entryJSON `json:"entries"`
+}
+
+func (a *app) summary(name string, e *Event, now time.Time) eventJSON {
+	last := e.Last()
+	return eventJSON{
+		Name:           name,
+		Last:           a.rfc3339(last.At),
+		ElapsedSeconds: seconds(now.Sub(last.At)),
+		Count:          e.Count,
+		Note:           last.Note,
+	}
+}
+
+func (a *app) writeJSON(v any) error {
+	enc := json.NewEncoder(a.stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func (a *app) cmdMark(o options, args []string) error {
@@ -77,20 +137,24 @@ func (a *app) cmdMark(o options, args []string) error {
 	}
 	m := Mark{At: at.Truncate(time.Second).UTC(), Note: o.note}
 	var prev *Mark
+	var ev Event
 	err = s.Update(func(d *Data) error {
 		if e := d.Events[name]; e != nil {
 			p := e.Last()
 			prev = &p
 		}
-		d.Mark(name, m)
+		ev = *d.Mark(name, m)
 		return nil
 	})
 	if err != nil {
 		return err
 	}
+	if o.json {
+		return a.writeJSON(a.summary(name, &ev, now))
+	}
 	msg := fmt.Sprintf("marked %s (%s)", name, a.when(m.At, now))
 	if prev != nil && m.At.After(prev.At) {
-		msg += "; previous was " + formatDuration(m.At.Sub(prev.At)) + " earlier"
+		msg += "; previous was " + o.dur(m.At.Sub(prev.At)) + " earlier"
 	}
 	fmt.Fprintln(a.stdout, msg)
 	return nil
@@ -111,7 +175,15 @@ func (a *app) cmdShow(o options, args []string) error {
 	}
 	now := a.now()
 	last := e.Last()
-	fmt.Fprintf(a.stdout, "%s: %s (%s)\n", name, relative(now.Sub(last.At)), a.when(last.At, now))
+	elapsed := now.Sub(last.At)
+	switch {
+	case o.json:
+		return a.writeJSON(a.summary(name, e, now))
+	case o.seconds:
+		fmt.Fprintln(a.stdout, seconds(elapsed))
+	default:
+		fmt.Fprintf(a.stdout, "%s: %s (%s)\n", name, relative(elapsed, o.style()), a.when(last.At, now))
+	}
 	return nil
 }
 
@@ -139,18 +211,30 @@ func (a *app) cmdList(o options, args []string) error {
 		return err
 	}
 	names := sortedNames(d)
+	now := a.now()
+	if o.json {
+		out := make([]eventJSON, 0, len(names))
+		for _, name := range names {
+			out = append(out, a.summary(name, d.Events[name], now))
+		}
+		return a.writeJSON(out)
+	}
 	if len(names) == 0 {
 		fmt.Fprintln(a.stderr, "no events yet; record one with: since mark NAME")
 		return nil
 	}
-	now := a.now()
 	width := 0
 	for _, name := range names {
 		width = max(width, utf8.RuneCountInString(name))
 	}
 	for _, name := range names {
+		elapsed := now.Sub(d.Events[name].Last().At)
+		value := relative(elapsed, o.style())
+		if o.seconds {
+			value = strconv.FormatInt(seconds(elapsed), 10)
+		}
 		pad := strings.Repeat(" ", width-utf8.RuneCountInString(name))
-		fmt.Fprintf(a.stdout, "%s%s  %s\n", name, pad, relative(now.Sub(d.Events[name].Last().At)))
+		fmt.Fprintf(a.stdout, "%s%s  %s\n", name, pad, value)
 	}
 	return nil
 }
@@ -169,32 +253,116 @@ func (a *app) cmdLog(o options, args []string) error {
 		return notFound(name)
 	}
 	now := a.now()
+	avg, hasAvg := e.AverageInterval()
+	intervals := e.Intervals()
+
+	if o.json {
+		out := logJSON{eventJSON: a.summary(name, e, now), Entries: make([]entryJSON, len(e.Marks))}
+		if hasAvg {
+			s := seconds(avg)
+			out.AverageIntervalSeconds = &s
+		}
+		for i, m := range e.Marks {
+			out.Entries[i] = entryJSON{At: a.rfc3339(m.At), Note: m.Note}
+			if i > 0 {
+				s := seconds(intervals[i-1])
+				out.Entries[i].IntervalSeconds = &s
+			}
+		}
+		return a.writeJSON(out)
+	}
 
 	header := name + ": " + plural(e.Count, "mark")
 	if e.Count > len(e.Marks) {
 		header += fmt.Sprintf(" (showing the last %d)", len(e.Marks))
 	}
-	header += ", last " + relative(now.Sub(e.Last().At))
-	if avg, ok := e.AverageInterval(); ok {
-		header += ", every " + formatDuration(avg) + " on average"
+	header += ", last " + o.ago(now.Sub(e.Last().At))
+	if hasAvg {
+		header += ", every " + o.dur(avg) + " on average"
 	}
 	fmt.Fprintln(a.stdout, header)
 
-	intervals := make([]string, len(e.Marks))
+	cells := make([]string, len(e.Marks))
 	width := 0
-	for i, iv := range e.Intervals() {
-		intervals[i+1] = "+" + formatDuration(iv)
-		width = max(width, len(intervals[i+1]))
+	for i, iv := range intervals {
+		cells[i+1] = "+" + o.dur(iv)
+		width = max(width, len(cells[i+1]))
 	}
 	for i, m := range e.Marks {
 		line := "  " + m.At.In(a.loc).Format("Mon 2006-01-02 15:04")
 		if width > 0 {
-			line += "  " + intervals[i] + strings.Repeat(" ", width-len(intervals[i]))
+			line += "  " + cells[i] + strings.Repeat(" ", width-len(cells[i]))
 		}
 		if m.Note != "" {
 			line += "  " + m.Note
 		}
 		fmt.Fprintln(a.stdout, strings.TrimRight(line, " "))
 	}
+	return nil
+}
+
+func (a *app) cmdRemove(o options, args []string) error {
+	if len(args) == 0 {
+		return usagef("usage: since rm NAME...")
+	}
+	s, err := a.store()
+	if err != nil {
+		return err
+	}
+	removed := map[string]int{}
+	err = s.Update(func(d *Data) error {
+		for _, name := range args {
+			e := d.Events[name]
+			if e == nil {
+				return notFound(name)
+			}
+			removed[name] = e.Count
+			delete(d.Events, name)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, name := range args {
+		if n, ok := removed[name]; ok {
+			fmt.Fprintf(a.stdout, "removed %s (%s)\n", name, plural(n, "mark"))
+			delete(removed, name)
+		}
+	}
+	return nil
+}
+
+func (a *app) cmdRename(o options, args []string) error {
+	if len(args) != 2 {
+		return usagef("usage: since rename OLD NEW")
+	}
+	from, to := args[0], args[1]
+	if err := validName(to); err != nil {
+		return err
+	}
+	s, err := a.store()
+	if err != nil {
+		return err
+	}
+	err = s.Update(func(d *Data) error {
+		e := d.Events[from]
+		if e == nil {
+			return notFound(from)
+		}
+		if from == to {
+			return nil
+		}
+		if _, exists := d.Events[to]; exists {
+			return fmt.Errorf("an event named %q already exists", to)
+		}
+		d.Events[to] = e
+		delete(d.Events, from)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.stdout, "renamed %s to %s\n", from, to)
 	return nil
 }
