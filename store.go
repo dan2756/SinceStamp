@@ -178,7 +178,18 @@ func (s *Store) Save(d *Data) (err error) {
 
 // Update loads the store, applies fn and saves the result. Nothing is
 // written if fn returns an error.
+//
+// The whole read-modify-write runs under an exclusive lock on a sidecar
+// file (events.json.lock), so concurrent updates queue up instead of
+// overwriting each other. Plain reads don't need the lock: Save's rename
+// means they always see a complete file.
 func (s *Store) Update(fn func(*Data) error) error {
+	unlock, err := lockFile(s.Path + ".lock")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	d, err := s.Load()
 	if err != nil {
 		return err

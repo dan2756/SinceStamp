@@ -151,12 +151,12 @@ func TestStoreSaveLeavesNoTempFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "events.json" {
-		var names []string
-		for _, e := range entries {
-			names = append(names, e.Name())
+	for _, e := range entries {
+		switch e.Name() {
+		case "events.json", "events.json.lock":
+		default:
+			t.Errorf("unexpected file left in data dir: %s", e.Name())
 		}
-		t.Fatalf("unexpected files in data dir: %v", names)
 	}
 }
 

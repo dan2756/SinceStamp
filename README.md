@@ -81,9 +81,16 @@ array of `{at, interval_seconds, note}`.
 
 The last 100 marks of each event are kept; `count` keeps counting past that.
 
+## Storage
+
 Events are kept in `$XDG_DATA_HOME/since/events.json`
 (`~/.local/share/since/events.json` by default). Set `SINCE_FILE` to use a
 different file.
+
+The file is plain JSON and safe to edit by hand. Writes go to a temporary file
+that is renamed into place, so it is never left half-written, and updates hold
+an exclusive lock on `events.json.lock` so marks made at the same moment (from
+a hook, cron, or two terminals) all get recorded.
 
 ## License
 
