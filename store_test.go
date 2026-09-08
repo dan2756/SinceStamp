@@ -183,3 +183,68 @@ func TestDataPath(t *testing.T) {
 		})
 	}
 }
+
+// A symlinked events file, say into a synced folder, used to be replaced by
+// a regular file on the first write, so later marks never reached the
+// target.
+func TestUpdateThroughSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "synced", "events.json")
+	link := filepath.Join(dir, "events.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("synced", "events.json"), link); err != nil {
+		t.Skipf("can't create a symlink: %v", err)
+	}
+
+	s := &Store{Path: link}
+	if err := s.Update(func(d *Data) error {
+		d.Mark("coffee", Mark{At: time.Now().UTC()})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced: %v, %v", fi, err)
+	}
+	d, err := (&Store{Path: target}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Events["coffee"] == nil {
+		t.Error("the mark didn't reach the link's target")
+	}
+	fi, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o644 {
+		t.Errorf("mode = %v, want the original -rw-r--r--", got)
+	}
+	if _, err := os.Stat(target + ".lock"); err != nil {
+		t.Errorf("lock should sit next to the target: %v", err)
+	}
+}
+
+func TestSaveThroughDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "synced", "events.json")
+	link := filepath.Join(dir, "events.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("can't create a symlink: %v", err)
+	}
+	if err := (&Store{Path: link}).Save(newData()); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced: %v, %v", fi, err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("target wasn't created: %v", err)
+	}
+}

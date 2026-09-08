@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -23,6 +24,9 @@ func TestFormatDuration(t *testing.T) {
 		{year + 6*week + 2*day, "1y 6w"},
 		{3*year + 2*day, "3y"},
 		{-(2*time.Hour + 14*time.Minute), "2h 14m"},
+		// What time.Sub saturates to for times ~292 years apart.
+		{math.MaxInt64, "292y 24w"},
+		{math.MinInt64, "292y 24w"},
 	}
 	for _, tt := range tests {
 		if got := formatDuration(tt.d, style{}); got != tt.want {
@@ -38,8 +42,12 @@ func TestRelative(t *testing.T) {
 	}{
 		{0, "just now"},
 		{999 * time.Millisecond, "just now"},
+		{-999 * time.Millisecond, "just now"},
 		{time.Second, "1s ago"},
 		{2*time.Hour + 14*time.Minute, "2h 14m ago"},
+		{-3 * time.Hour, "in 3h"},
+		{-(2*day + 30*time.Minute), "in 2d"},
+		{-(5*week + 3*day), "in 5w 3d"},
 	}
 	for _, tt := range tests {
 		if got := relative(tt.d, style{}); got != tt.want {
@@ -83,5 +91,29 @@ func TestSeconds(t *testing.T) {
 		if got := seconds(tt.d); got != tt.want {
 			t.Errorf("seconds(%v) = %d, want %d", tt.d, got, tt.want)
 		}
+	}
+}
+
+func TestFormatDurationPrecise(t *testing.T) {
+	tests := []struct {
+		d     time.Duration
+		short bool
+		want  string
+	}{
+		{0, false, "0s"},
+		{2*time.Hour + 14*time.Minute + 9*time.Second, false, "2h 14m 9s"},
+		{2*time.Hour + 9*time.Second, false, "2h 9s"},
+		{2 * time.Hour, false, "2h"},
+		{year + 2*week + 3*day + 4*time.Hour + 5*time.Minute + 6*time.Second, false, "1y 2w 3d 4h 5m 6s"},
+		{year + 6*time.Second, false, "1y 6s"},
+		{2*time.Hour + 14*time.Minute + 9*time.Second, true, "2h14m9s"},
+	}
+	for _, tt := range tests {
+		if got := formatDuration(tt.d, style{short: tt.short, precise: true}); got != tt.want {
+			t.Errorf("formatDuration(%v, precise, short=%v) = %q, want %q", tt.d, tt.short, got, tt.want)
+		}
+	}
+	if got := relative(-(3*time.Hour + 5*time.Second), style{precise: true}); got != "in 3h 5s" {
+		t.Errorf("relative precise future = %q", got)
 	}
 }

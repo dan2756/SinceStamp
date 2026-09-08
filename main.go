@@ -27,16 +27,18 @@ Usage:
                      rename an event
 
 Flags:
-  --at WHEN          when it happened: 3h (ago), 1d2h, 15:04, "2026-01-02 15:04",
-                     or RFC 3339 such as 2026-01-02T15:04:05Z
+  --at WHEN          when it happened: 3h (ago), 1d2h, +2d (from now), 15:04,
+                     "2026-01-02 15:04", or RFC 3339 such as 2026-01-02T15:04:05Z
   --note TEXT        attach a note to the mark
   --json             print JSON (show, ls, log and mark)
   --short            compact durations: 2h14m
   --seconds          durations as whole seconds
+  --precise          every unit down to seconds: 2h 14m 9s
   -h, --help         show this help
   --version          print the version
 
-The last 100 marks of each event are kept.
+The last 100 marks of each event are kept. Exit status is 1 when an event
+doesn't exist or something else fails, and 2 for usage errors.
 
 Events are stored in $SINCE_FILE, or $XDG_DATA_HOME/since/events.json
 (default ~/.local/share/since/events.json).
@@ -56,11 +58,18 @@ func main() {
 	a := &app{
 		stdout: os.Stdout,
 		stderr: os.Stderr,
-		now:    time.Now,
+		now:    wallClock,
 		loc:    time.Local,
 		getenv: os.Getenv,
 	}
 	os.Exit(a.run(os.Args[1:]))
+}
+
+// wallClock is the current time truncated to whole seconds, the precision
+// marks are stored with. Otherwise a mark made "--at +3h" would read back as
+// "in 2h 59m" a fraction of a second later.
+func wallClock() time.Time {
+	return time.Now().Truncate(time.Second)
 }
 
 // usageError reports a bad invocation; it exits with status 2.
@@ -72,11 +81,33 @@ func usagef(format string, args ...any) error {
 	return usageError{fmt.Sprintf(format, args...)}
 }
 
+// errWriter passes writes through to w and remembers the first error, so
+// commands can print freely and still have a failed write to stdout (a full
+// disk, a closed descriptor) reported.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) Write(p []byte) (int, error) {
+	if e.err != nil {
+		return 0, e.err
+	}
+	n, err := e.w.Write(p)
+	e.err = err
+	return n, err
+}
+
 // run executes the command line and returns the process exit status.
 func (a *app) run(args []string) int {
 	opts, pos, err := parseArgs(args)
 	if err == nil {
-		err = a.dispatch(opts, pos)
+		out := &errWriter{w: a.stdout}
+		c := *a
+		c.stdout = out
+		if err = c.dispatch(opts, pos); err == nil {
+			err = out.err
+		}
 	}
 	if err == nil {
 		return 0

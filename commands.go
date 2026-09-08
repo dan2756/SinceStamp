@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 func (a *app) store() (*Store, error) {
@@ -50,10 +49,14 @@ func (o options) dur(d time.Duration) string {
 
 // ago describes how long ago something happened, honouring the output flags.
 func (o options) ago(d time.Duration) string {
-	if o.seconds {
+	switch {
+	case !o.seconds:
+		return relative(d, o.style())
+	case d < 0:
+		return "in " + o.dur(-d)
+	default:
 		return o.dur(d) + " ago"
 	}
-	return relative(d, o.style())
 }
 
 func validName(name string) error {
@@ -150,7 +153,13 @@ func (a *app) cmdMark(o options, args []string) error {
 		return err
 	}
 	if o.json {
-		return a.writeJSON(a.summary(name, &ev, now))
+		// Describe the mark just recorded, as the text output does, even
+		// when --at put it before the event's latest mark.
+		out := a.summary(name, &ev, now)
+		out.Last = a.rfc3339(m.At)
+		out.ElapsedSeconds = seconds(now.Sub(m.At))
+		out.Note = m.Note
+		return a.writeJSON(out)
 	}
 	msg := fmt.Sprintf("marked %s (%s)", name, a.when(m.At, now))
 	if prev != nil && m.At.After(prev.At) {
@@ -225,7 +234,7 @@ func (a *app) cmdList(o options, args []string) error {
 	}
 	width := 0
 	for _, name := range names {
-		width = max(width, utf8.RuneCountInString(name))
+		width = max(width, displayWidth(name))
 	}
 	for _, name := range names {
 		elapsed := now.Sub(d.Events[name].Last().At)
@@ -233,7 +242,7 @@ func (a *app) cmdList(o options, args []string) error {
 		if o.seconds {
 			value = strconv.FormatInt(seconds(elapsed), 10)
 		}
-		pad := strings.Repeat(" ", width-utf8.RuneCountInString(name))
+		pad := strings.Repeat(" ", width-displayWidth(name))
 		fmt.Fprintf(a.stdout, "%s%s  %s\n", name, pad, value)
 	}
 	return nil
@@ -276,7 +285,11 @@ func (a *app) cmdLog(o options, args []string) error {
 	if e.Count > len(e.Marks) {
 		header += fmt.Sprintf(" (showing the last %d)", len(e.Marks))
 	}
-	header += ", last " + o.ago(now.Sub(e.Last().At))
+	if elapsed := now.Sub(e.Last().At); elapsed < 0 {
+		header += ", next " + o.ago(elapsed)
+	} else {
+		header += ", last " + o.ago(elapsed)
+	}
 	if hasAvg {
 		header += ", every " + o.dur(avg) + " on average"
 	}
@@ -312,6 +325,9 @@ func (a *app) cmdRemove(o options, args []string) error {
 	removed := map[string]int{}
 	err = s.Update(func(d *Data) error {
 		for _, name := range args {
+			if _, done := removed[name]; done {
+				continue // named twice
+			}
 			e := d.Events[name]
 			if e == nil {
 				return notFound(name)

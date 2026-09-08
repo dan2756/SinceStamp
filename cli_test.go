@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -241,6 +242,10 @@ func TestRemove(t *testing.T) {
 		t.Errorf("rm of an unknown event: exit %d, want 1", code)
 	}
 	ta.must("c")
+	// A name given twice (from a glob or xargs) is removed once.
+	if got, want := ta.must("rm", "c", "c"), "removed c (1 mark)\n"; got != want {
+		t.Errorf("rm c c: got %q, want %q", got, want)
+	}
 }
 
 func TestRename(t *testing.T) {
@@ -272,5 +277,105 @@ func TestShowSubcommandForReservedNames(t *testing.T) {
 	ta.advance(time.Hour)
 	if got, want := ta.must("show", "log"), "log: 1h ago (Mon Jan 5 09:12)\n"; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFutureEvents(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "coffee")
+	ta.must("mark", "dentist", "--at", "+2d3h")
+	ta.advance(time.Hour)
+
+	if got, want := ta.must("dentist"), "dentist: in 2d 2h (Wed Jan 7 12:12)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := ta.must("dentist", "--seconds"), "-180000\n"; got != want {
+		t.Errorf("--seconds: got %q, want %q", got, want)
+	}
+	if got, want := ta.must("ls"), "dentist  in 2d 2h\ncoffee   1h ago\n"; got != want {
+		t.Errorf("ls: got %q, want %q", got, want)
+	}
+	if got := ta.must("log", "dentist"); !strings.HasPrefix(got, "dentist: 1 mark, next in 2d 2h\n") {
+		t.Errorf("log: got %q", got)
+	}
+
+	var ev eventJSON
+	if err := json.Unmarshal([]byte(ta.must("dentist", "--json")), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.ElapsedSeconds != -180000 {
+		t.Errorf("elapsed_seconds = %d, want -180000", ev.ElapsedSeconds)
+	}
+}
+
+func TestShowPrecise(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "coffee")
+	ta.advance(2*time.Hour + 14*time.Minute + 9*time.Second)
+	if got, want := ta.must("coffee", "--precise"), "coffee: 2h 14m 9s ago (Mon Jan 5 09:12)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := ta.must("coffee", "--precise", "--short"), "coffee: 2h14m9s ago (Mon Jan 5 09:12)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestShowOlderThanAYear(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "passport", "--at", "2024-11-20 14:00")
+	if got, want := ta.must("passport"), "passport: 1y 6w ago (Wed Nov 20 2024 14:00)\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// mark --json used to describe the event's newest mark, so a backdated
+// mark's time and note never showed up.
+func TestMarkJSONDescribesNewMark(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "coffee", "--note", "latest")
+	ta.advance(time.Minute)
+
+	var got eventJSON
+	if err := json.Unmarshal([]byte(ta.must("mark", "coffee", "--at", "2026-01-02", "--note", "old", "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := eventJSON{Name: "coffee", Last: "2026-01-02T00:00:00-05:00", ElapsedSeconds: 3*86400 + 9*3600 + 13*60, Count: 2, Note: "old"}
+	if got != want {
+		t.Errorf("got  %+v\nwant %+v", got, want)
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// Text output used to ignore write errors and exit 0, unlike --json.
+func TestStdoutWriteErrorFails(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "coffee")
+	ta.app.stdout = failWriter{}
+	for _, args := range [][]string{{"ls"}, {"coffee"}, {"coffee", "--json"}, {"log", "coffee"}, {"mark", "tea"}} {
+		if code, _ := ta.run(args...); code != 1 {
+			t.Errorf("since %v: exit %d, want 1", args, code)
+		}
+		if !strings.Contains(ta.stderr.String(), "no space left on device") {
+			t.Errorf("since %v: stderr = %q", args, ta.stderr.String())
+		}
+	}
+}
+
+func TestListAlignsWideNames(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "x", "--at", "2h")
+	ta.must("mark", "日本語", "--at", "1h")
+	ta.must("mark", "e\u0301")
+	ta.must("mark", "☕")
+
+	want := "e\u0301       just now\n" +
+		"☕      just now\n" +
+		"日本語  1h ago\n" +
+		"x       2h ago\n"
+	if got := ta.must("ls"); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }

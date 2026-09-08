@@ -40,6 +40,13 @@ func TestParseWhen(t *testing.T) {
 		{"10:00:30", local(2026, 1, 5, 10, 0, 30)},
 		// A clock time that hasn't come yet today means yesterday.
 		{"23:00", local(2026, 1, 4, 23, 0, 0)},
+		// Future times, for things that are coming up.
+		{"+3h", local(2026, 1, 5, 14, 26, 0)},
+		{"+1d2h", local(2026, 1, 6, 13, 26, 0)},
+		{"in 2 days", local(2026, 1, 7, 11, 26, 0)},
+		{"In 30m", local(2026, 1, 5, 11, 56, 0)},
+		{"2026-03-01 10:00", local(2026, 3, 1, 10, 0, 0)},
+		{"1900-01-01", local(1900, 1, 1, 0, 0, 0)},
 	}
 	for _, tt := range tests {
 		got, err := parseWhen(tt.in, now, testZone)
@@ -58,6 +65,9 @@ func TestParseWhenErrors(t *testing.T) {
 	for _, in := range []string{
 		"", "  ", "soon", "3", "3x", "3h4", "h", "1..5h", "1e9y", "300y",
 		"2026-13-01", "2026-01-02 25:00", "24:00", "ago",
+		"+", "in", "in ", "in 3h ago", "+-3h",
+		// Absolute dates get the same 200-year limit as relative ones.
+		"2400-01-01", "1700-01-01 12:00", "2400-01-01T00:00:00Z",
 	} {
 		if got, err := parseWhen(in, now, testZone); err == nil {
 			t.Errorf("parseWhen(%q) = %v, want an error", in, got)

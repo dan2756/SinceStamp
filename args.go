@@ -10,6 +10,7 @@ type options struct {
 	json    bool
 	short   bool
 	seconds bool
+	precise bool
 
 	at      string
 	atSet   bool
@@ -65,6 +66,8 @@ func parseArgs(args []string) (options, []string, error) {
 			flag = &o.short
 		case "seconds":
 			flag = &o.seconds
+		case "precise":
+			flag = &o.precise
 		default:
 			return o, nil, usagef("unknown flag %s", arg)
 		}
@@ -77,5 +80,5 @@ func parseArgs(args []string) (options, []string, error) {
 }
 
 func (o options) style() style {
-	return style{short: o.short}
+	return style{short: o.short, precise: o.precise}
 }

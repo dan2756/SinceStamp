@@ -21,6 +21,7 @@ var absoluteLayouts = []string{
 // parseWhen interprets the value of --at relative to now:
 //
 //	3h, 1d2h, "90 min", "3h ago"   that long before now
+//	+3h, "in 2 days"               that long after now
 //	15:04, 15:04:05                today at that time, or yesterday if that is still ahead
 //	2026-01-02 15:04, 2026-01-02   a local date and time
 //	2026-01-02T15:04:05Z           RFC 3339, with any offset
@@ -34,11 +35,11 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		return now, nil
 	}
 	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return t, nil
+		return inRange(t, now)
 	}
 	for _, layout := range absoluteLayouts {
 		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			return t, nil
+			return inRange(t, now)
 		}
 	}
 	for _, layout := range []string{"15:04:05", "15:04"} {
@@ -54,11 +55,23 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		return t, nil
 	}
 
-	rel := strings.TrimPrefix(s, "-")
-	rel = strings.TrimSpace(strings.TrimSuffix(rel, "ago"))
+	future := false
+	rel := s
+	switch {
+	case strings.HasPrefix(rel, "+"):
+		future, rel = true, rel[1:]
+	case len(rel) > 3 && strings.EqualFold(rel[:3], "in "):
+		future, rel = true, rel[3:]
+	default:
+		rel = strings.TrimPrefix(rel, "-")
+		rel = strings.TrimSpace(strings.TrimSuffix(rel, "ago"))
+	}
 	d, err := parseSpan(rel)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("can't understand time %q (try 3h, 2d, 15:04, \"2026-01-02 15:04\" or RFC 3339)", s)
+		return time.Time{}, fmt.Errorf("can't understand time %q (try 3h, +2d, 15:04, \"2026-01-02 15:04\" or RFC 3339)", s)
+	}
+	if future {
+		return now.Add(d), nil
 	}
 	return now.Add(-d), nil
 }
@@ -74,6 +87,15 @@ var spanUnits = map[string]time.Duration{
 
 // maxSpan keeps relative times well inside what time.Duration can hold.
 const maxSpan = 200 * year
+
+// inRange rejects a date further from now than a relative time may reach.
+// Beyond about 292 years the elapsed time no longer fits in a Duration.
+func inRange(t, now time.Time) (time.Time, error) {
+	if t.Before(now.Add(-maxSpan)) || t.After(now.Add(maxSpan)) {
+		return time.Time{}, fmt.Errorf("%s is more than %d years from now", t.Format("2006-01-02"), maxSpan/year)
+	}
+	return t, nil
+}
 
 // parseSpan parses a length of time such as "3h", "1d2h", "1.5h" or
 // "2 days 3 hours". Unlike time.ParseDuration it knows days, weeks and

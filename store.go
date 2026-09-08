@@ -140,7 +140,9 @@ func (s *Store) Load() (*Data, error) {
 
 // Save writes d atomically: the data goes to a temporary file in the same
 // directory, which is then renamed over the old file. Readers see either the
-// old or the new contents, never a partial write.
+// old or the new contents, never a partial write. When the path is a
+// symlink, the file it points to is replaced rather than the link, and an
+// existing file keeps its permissions.
 func (s *Store) Save(d *Data) (err error) {
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
@@ -148,11 +150,15 @@ func (s *Store) Save(d *Data) (err error) {
 	}
 	b = append(b, '\n')
 
-	dir := filepath.Dir(s.Path)
+	path, err := resolveLinks(s.Path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, "."+filepath.Base(s.Path)+".*.tmp")
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -162,6 +168,14 @@ func (s *Store) Save(d *Data) (err error) {
 			os.Remove(tmp)
 		}
 	}()
+	// CreateTemp makes the file 0600, which is also what a new events file
+	// gets; one that already exists keeps its mode.
+	if fi, statErr := os.Stat(path); statErr == nil {
+		if err = f.Chmod(fi.Mode().Perm()); err != nil {
+			f.Close()
+			return err
+		}
+	}
 	if _, err = f.Write(b); err != nil {
 		f.Close()
 		return err
@@ -173,7 +187,26 @@ func (s *Store) Save(d *Data) (err error) {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.Path)
+	return os.Rename(tmp, path)
+}
+
+// resolveLinks follows path for as long as it is a symbolic link, so a
+// write lands in the file the link points to (one in a synced folder, say)
+// instead of replacing the link. The target doesn't have to exist yet.
+func resolveLinks(path string) (string, error) {
+	orig := path
+	for range 40 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			// Not a link, or nothing there yet: this is the file.
+			return path, nil
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		path = target
+	}
+	return "", fmt.Errorf("%s: too many levels of symbolic links", orig)
 }
 
 // Update loads the store, applies fn and saves the result. Nothing is
@@ -182,9 +215,14 @@ func (s *Store) Save(d *Data) (err error) {
 // The whole read-modify-write runs under an exclusive lock on a sidecar
 // file (events.json.lock), so concurrent updates queue up instead of
 // overwriting each other. Plain reads don't need the lock: Save's rename
-// means they always see a complete file.
+// means they always see a complete file. The lock sits next to the file a
+// symlink points to, so writers using the link and the real path share it.
 func (s *Store) Update(fn func(*Data) error) error {
-	unlock, err := lockFile(s.Path + ".lock")
+	path, err := resolveLinks(s.Path)
+	if err != nil {
+		return err
+	}
+	unlock, err := lockFile(path + ".lock")
 	if err != nil {
 		return err
 	}
