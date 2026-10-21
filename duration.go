@@ -89,3 +89,63 @@ func relative(d time.Duration, st style) string {
 func seconds(d time.Duration) int64 {
 	return int64(d / time.Second)
 }
+
+// wholeSeconds is the whole seconds from earlier to later. Time.Sub saturates
+// at about 292 years, but --at allows a mark 200 years either side of now, so
+// the gap between those two has to be counted from the unix times instead.
+func wholeSeconds(later, earlier time.Time) int64 {
+	d := later.Sub(earlier)
+	if later.Equal(earlier.Add(d)) {
+		return seconds(d)
+	}
+	return diffSeconds(later.Unix(), earlier.Unix())
+}
+
+// diffSeconds is a-b, saturating at the edges of int64.
+func diffSeconds(a, b int64) int64 {
+	if a >= 0 && b < 0 && a > math.MaxInt64+b {
+		return math.MaxInt64
+	}
+	if a < 0 && b > 0 && a < math.MinInt64+b {
+		return math.MinInt64
+	}
+	return a - b
+}
+
+// formatSeconds renders a length in whole seconds the way formatDuration does.
+// secs may be larger than a Duration can hold. The sign of secs is ignored.
+func formatSeconds(secs int64, st style) string {
+	if secs < 0 {
+		if secs == math.MinInt64 {
+			secs = math.MaxInt64
+		} else {
+			secs = -secs
+		}
+	}
+	const maxSecs = int64(math.MaxInt64 / int64(time.Second))
+	if secs <= maxSecs {
+		return formatDuration(time.Duration(secs)*time.Second, st)
+	}
+	yearSecs := int64(year / time.Second)
+	years := secs / yearSecs
+	rem := secs % yearSecs
+	if !st.precise {
+		weeks := rem / int64(week/time.Second)
+		if weeks == 0 {
+			return fmt.Sprintf("%dy", years)
+		}
+		if st.short {
+			return fmt.Sprintf("%dy%dw", years, weeks)
+		}
+		return fmt.Sprintf("%dy %dw", years, weeks)
+	}
+	rest := formatDuration(time.Duration(rem)*time.Second, st)
+	if rest == "0s" {
+		return fmt.Sprintf("%dy", years)
+	}
+	sep := " "
+	if st.short {
+		sep = ""
+	}
+	return fmt.Sprintf("%dy%s%s", years, sep, rest)
+}

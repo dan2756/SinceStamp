@@ -94,6 +94,57 @@ func TestSeconds(t *testing.T) {
 	}
 }
 
+func TestWholeSeconds(t *testing.T) {
+	a := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	b := a.Add(2*time.Hour + 14*time.Minute + 9*time.Second)
+	if got, want := wholeSeconds(b, a), int64(2*3600+14*60+9); got != want {
+		t.Fatalf("wholeSeconds = %d, want %d", got, want)
+	}
+	// Fractional seconds truncate toward zero, same as seconds(Sub).
+	early := time.Unix(0, 900_000_000).UTC()
+	late := time.Unix(2, 0).UTC()
+	if got, want := wholeSeconds(late, early), seconds(late.Sub(early)); got != want {
+		t.Fatalf("fractional wholeSeconds = %d, want %d", got, want)
+	}
+
+	farEarly := time.Date(1600, 1, 1, 0, 0, 0, 0, time.UTC)
+	farLate := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+	if farEarly.Add(farLate.Sub(farEarly)).Equal(farLate) {
+		t.Fatal("expected Sub to saturate across 600 years")
+	}
+	if got, want := wholeSeconds(farLate, farEarly), farLate.Unix()-farEarly.Unix(); got != want {
+		t.Fatalf("saturated wholeSeconds = %d, want %d", got, want)
+	}
+}
+
+func TestFormatSeconds(t *testing.T) {
+	yearSecs := int64(year / time.Second)
+	weekSecs := int64(week / time.Second)
+	daySecs := int64(day / time.Second)
+	tests := []struct {
+		secs  int64
+		short bool
+		prec  bool
+		want  string
+	}{
+		{0, false, false, "0s"},
+		{45, false, false, "45s"},
+		{2*3600 + 14*60 + 9, false, false, "2h 14m"},
+		{2*3600 + 14*60 + 9, false, true, "2h 14m 9s"},
+		{2*3600 + 14*60 + 9, true, true, "2h14m9s"},
+		{400 * yearSecs, false, false, "400y"},
+		{400*yearSecs + 2*weekSecs + 3*daySecs + 4, false, false, "400y 2w"},
+		{400*yearSecs + 2*weekSecs + 3*daySecs + 4, false, true, "400y 2w 3d 4s"},
+		{400*yearSecs + 2*weekSecs + 4, true, true, "400y2w4s"},
+		{-(400*yearSecs + 2*weekSecs), false, false, "400y 2w"},
+	}
+	for _, tt := range tests {
+		if got := formatSeconds(tt.secs, style{short: tt.short, precise: tt.prec}); got != tt.want {
+			t.Errorf("formatSeconds(%d, short=%v, precise=%v) = %q, want %q", tt.secs, tt.short, tt.prec, got, tt.want)
+		}
+	}
+}
+
 func TestFormatDurationPrecise(t *testing.T) {
 	tests := []struct {
 		d     time.Duration

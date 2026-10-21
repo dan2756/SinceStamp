@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,13 +17,13 @@ func TestEventIntervals(t *testing.T) {
 		{At: base.Add(4 * time.Hour)},
 		{At: base.Add(4 * time.Hour)},
 	}}
-	want := []time.Duration{time.Hour, 3 * time.Hour, 0}
+	want := []int64{int64(time.Hour / time.Second), int64(3 * time.Hour / time.Second), 0}
 	if got := e.Intervals(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Intervals() = %v, want %v", got, want)
 	}
 	avg, ok := e.AverageInterval()
-	if !ok || avg != 80*time.Minute {
-		t.Errorf("AverageInterval() = %v, %v; want 1h20m, true", avg, ok)
+	if !ok || avg != int64((80*time.Minute)/time.Second) {
+		t.Errorf("AverageInterval() = %d, %v; want 4800, true", avg, ok)
 	}
 }
 
@@ -137,6 +138,47 @@ func TestLogJSONSingleMarkHasNullAverage(t *testing.T) {
 	out := ta.must("log", "gym", "--json")
 	if !strings.Contains(out, `"average_interval_seconds": null`) || !strings.Contains(out, `"interval_seconds": null`) {
 		t.Errorf("expected explicit nulls:\n%s", out)
+	}
+}
+
+// Two marks at opposite ends of the --at window are about 400 years apart.
+// time.Duration saturates near 292 years, so the gap used to read as 292y.
+func TestFarApartMarksKeepRealInterval(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "span", "--at", "200y")
+	marked := ta.must("mark", "span", "--at", "+200y")
+
+	var got logJSON
+	if err := json.Unmarshal([]byte(ta.must("log", "span", "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entries) != 2 || got.Entries[1].IntervalSeconds == nil || got.AverageIntervalSeconds == nil {
+		t.Fatalf("log json = %+v", got)
+	}
+	t0, err := time.Parse(time.RFC3339, got.Entries[0].At)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := time.Parse(time.RFC3339, got.Entries[1].At)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := t1.Unix() - t0.Unix()
+	if *got.Entries[1].IntervalSeconds != want || *got.AverageIntervalSeconds != want {
+		t.Fatalf("interval = %d, average = %d, want unix diff %d", *got.Entries[1].IntervalSeconds, *got.AverageIntervalSeconds, want)
+	}
+	text := formatSeconds(want, style{})
+	if strings.Contains(text, "292y") || strings.Contains(marked, "292y") {
+		t.Fatalf("saturated text %q, mark message %q", text, marked)
+	}
+	if !strings.Contains(marked, text) {
+		t.Errorf("mark message %q does not contain %q", marked, text)
+	}
+	if log := ta.must("log", "span"); !strings.Contains(log, "+"+text) {
+		t.Errorf("log %q does not contain +%s", log, text)
+	}
+	if sec := ta.must("log", "span", "--seconds"); !strings.Contains(sec, strconv.FormatInt(want, 10)) {
+		t.Errorf("--seconds log %q does not contain %d", sec, want)
 	}
 }
 

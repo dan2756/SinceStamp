@@ -33,24 +33,33 @@ type Event struct {
 // Last returns the most recent mark.
 func (e *Event) Last() Mark { return e.Marks[len(e.Marks)-1] }
 
-// Intervals returns the time between each mark and the one before it, so
-// it has one entry fewer than Marks.
-func (e *Event) Intervals() []time.Duration {
-	var out []time.Duration
+// Intervals returns the whole seconds between each mark and the one before
+// it, so it has one entry fewer than Marks. The count stays exact when the
+// gap is longer than a Duration (about 292 years).
+func (e *Event) Intervals() []int64 {
+	if len(e.Marks) < 2 {
+		return nil
+	}
+	out := make([]int64, len(e.Marks)-1)
 	for i := 1; i < len(e.Marks); i++ {
-		out = append(out, e.Marks[i].At.Sub(e.Marks[i-1].At))
+		out[i-1] = wholeSeconds(e.Marks[i].At, e.Marks[i-1].At)
 	}
 	return out
 }
 
-// AverageInterval is the mean time between consecutive marks in the kept
-// history. It reports false when there are fewer than two marks.
-func (e *Event) AverageInterval() (time.Duration, bool) {
+// AverageInterval is the mean whole seconds between the first and last kept
+// marks. ok is false when there are fewer than two marks.
+func (e *Event) AverageInterval() (secs int64, ok bool) {
 	n := len(e.Marks)
 	if n < 2 {
 		return 0, false
 	}
-	return e.Marks[n-1].At.Sub(e.Marks[0].At) / time.Duration(n-1), true
+	later, earlier := e.Marks[n-1].At, e.Marks[0].At
+	d := later.Sub(earlier)
+	if later.Equal(earlier.Add(d)) {
+		return seconds(d / time.Duration(n-1)), true
+	}
+	return wholeSeconds(later, earlier) / int64(n-1), true
 }
 
 // Data is the document stored in the events file.

@@ -47,6 +47,15 @@ func (o options) dur(d time.Duration) string {
 	return formatDuration(d, o.style())
 }
 
+// durSeconds formats a length already counted in whole seconds, including
+// one longer than a Duration can hold.
+func (o options) durSeconds(secs int64) string {
+	if o.seconds {
+		return strconv.FormatInt(secs, 10) + "s"
+	}
+	return formatSeconds(secs, o.style())
+}
+
 // ago describes how long ago something happened, honouring the output flags.
 func (o options) ago(d time.Duration) string {
 	switch {
@@ -163,7 +172,7 @@ func (a *app) cmdMark(o options, args []string) error {
 	}
 	msg := fmt.Sprintf("marked %s (%s)", name, a.when(m.At, now))
 	if prev != nil && m.At.After(prev.At) {
-		msg += "; previous was " + o.dur(m.At.Sub(prev.At)) + " earlier"
+		msg += "; previous was " + o.durSeconds(wholeSeconds(m.At, prev.At)) + " earlier"
 	}
 	fmt.Fprintln(a.stdout, msg)
 	return nil
@@ -268,13 +277,12 @@ func (a *app) cmdLog(o options, args []string) error {
 	if o.json {
 		out := logJSON{eventJSON: a.summary(name, e, now), Entries: make([]entryJSON, len(e.Marks))}
 		if hasAvg {
-			s := seconds(avg)
-			out.AverageIntervalSeconds = &s
+			out.AverageIntervalSeconds = &avg
 		}
 		for i, m := range e.Marks {
 			out.Entries[i] = entryJSON{At: a.rfc3339(m.At), Note: m.Note}
 			if i > 0 {
-				s := seconds(intervals[i-1])
+				s := intervals[i-1]
 				out.Entries[i].IntervalSeconds = &s
 			}
 		}
@@ -291,14 +299,14 @@ func (a *app) cmdLog(o options, args []string) error {
 		header += ", last " + o.ago(elapsed)
 	}
 	if hasAvg {
-		header += ", every " + o.dur(avg) + " on average"
+		header += ", every " + o.durSeconds(avg) + " on average"
 	}
 	fmt.Fprintln(a.stdout, header)
 
 	cells := make([]string, len(e.Marks))
 	width := 0
 	for i, iv := range intervals {
-		cells[i+1] = "+" + o.dur(iv)
+		cells[i+1] = "+" + o.durSeconds(iv)
 		width = max(width, len(cells[i+1]))
 	}
 	for i, m := range e.Marks {
