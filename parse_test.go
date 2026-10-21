@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,9 @@ func TestParseWhen(t *testing.T) {
 		{"+3h", local(2026, 1, 5, 14, 26, 0)},
 		{"+1d2h", local(2026, 1, 6, 13, 26, 0)},
 		{"in 2 days", local(2026, 1, 7, 11, 26, 0)},
+		// Exactly 200 years is the limit, and it is still accepted.
+		{"200y", now.Add(-200 * year)},
+		{"+200y", now.Add(200 * year)},
 		{"In 30m", local(2026, 1, 5, 11, 56, 0)},
 		{"2026-03-01 10:00", local(2026, 3, 1, 10, 0, 0)},
 		{"1900-01-01", local(1900, 1, 1, 0, 0, 0)},
@@ -75,6 +79,18 @@ func TestParseWhenErrors(t *testing.T) {
 	} {
 		if got, err := parseWhen(in, now, testZone); err == nil {
 			t.Errorf("parseWhen(%q) = %v, want an error", in, got)
+		}
+	}
+}
+
+func TestParseWhenTooFar(t *testing.T) {
+	now := time.Date(2026, 1, 5, 11, 26, 0, 0, testZone)
+	// These used to come back as "can't understand time", which reads as a
+	// syntax error. 300y is a valid duration, just past the limit.
+	for _, in := range []string{"300y", "+300y", "200y1s", "200y 1s", "2400-01-01", "1700-01-01 12:00", "2400-01-01T00:00:00Z"} {
+		_, err := parseWhen(in, now, testZone)
+		if err == nil || !strings.Contains(err.Error(), "more than 200 years from now") {
+			t.Errorf("parseWhen(%q) error = %v, want a too-far error", in, err)
 		}
 	}
 }
