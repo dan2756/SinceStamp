@@ -164,7 +164,9 @@ func (s *Store) Save(d *Data) (err error) {
 		return err
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// Owner-only: the events file is private, so a directory created for it
+	// is too. MkdirAll leaves a directory that already exists alone.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
