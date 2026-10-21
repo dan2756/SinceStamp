@@ -64,7 +64,7 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		future, rel = true, rel[3:]
 	default:
 		rel = strings.TrimPrefix(rel, "-")
-		rel = strings.TrimSpace(strings.TrimSuffix(rel, "ago"))
+		rel = trimAgo(rel)
 	}
 	d, err := parseSpan(rel)
 	if err != nil {
@@ -74,6 +74,17 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		return now.Add(d), nil
 	}
 	return now.Add(-d), nil
+}
+
+// trimAgo drops a trailing "ago" in any case. The rest of parsing is
+// case-insensitive ("3H", "In 2 days", "NOW"), but a plain TrimSuffix was
+// not, so "3h AGO" and "2 Days Ago" failed while "3h ago" worked.
+func trimAgo(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 3 && strings.EqualFold(s[len(s)-3:], "ago") {
+		s = strings.TrimSpace(s[:len(s)-3])
+	}
+	return s
 }
 
 var spanUnits = map[string]time.Duration{
