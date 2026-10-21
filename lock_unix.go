@@ -13,7 +13,8 @@ import (
 // blocks until the lock is free. The lock is released by calling unlock, or
 // by the kernel if the process dies, so a crash never leaves a stale lock.
 func lockFile(path string) (unlock func(), err error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// Same owner-only mode as the events directory Save creates.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)

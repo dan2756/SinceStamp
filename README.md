@@ -174,8 +174,9 @@ The file is plain JSON and safe to edit by hand; out-of-order marks are sorted
 when it's read. Writes go to a temporary file that is renamed into place, so it
 is never left half-written, and updates hold an exclusive lock on
 `events.json.lock` so marks made at the same moment (from a hook, cron, or two
-terminals) all get recorded. A new file is readable only by you; an existing
-one keeps its permissions.
+terminals) all get recorded. A new directory is created so only you can access
+it, and a new file is readable only by you; an existing file keeps its
+permissions.
 
 The events file can be a symlink, for example into a synced folder: writes
 replace the file it points to, and the temporary file and the lock live next
