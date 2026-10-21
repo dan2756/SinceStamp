@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// errSpanTooLong is returned by parseSpan when a relative time is past the
+// 200-year limit. parseWhen reports it on its own; every other parse error
+// is a syntax problem and gets the "can't understand" hint.
+var errSpanTooLong = errors.New("duration too long")
+
 // absoluteLayouts are tried, in order, for dates without a zone; they are
 // interpreted in the local time zone.
 var absoluteLayouts = []string{
@@ -67,6 +72,9 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		rel = trimAgo(rel)
 	}
 	d, err := parseSpan(rel)
+	if errors.Is(err, errSpanTooLong) {
+		return time.Time{}, fmt.Errorf("%s is more than %d years from now", s, maxSpan/year)
+	}
 	if err != nil {
 		return time.Time{}, fmt.Errorf("can't understand time %q (try 3h, +2d, 15:04, \"2026-01-02 15:04\" or RFC 3339)", s)
 	}
@@ -143,7 +151,7 @@ func parseSpan(s string) (time.Duration, error) {
 		}
 		s = strings.TrimLeft(strings.TrimPrefix(s[j:], ","), " ")
 		if n*float64(size) > float64(maxSpan-total) {
-			return 0, errors.New("duration too long")
+			return 0, errSpanTooLong
 		}
 		total += time.Duration(n * float64(size))
 	}
