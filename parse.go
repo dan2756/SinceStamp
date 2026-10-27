@@ -31,6 +31,10 @@ var absoluteLayouts = []string{
 //	2026-01-02 15:04, 2026-01-02   a local date and time
 //	2026-01-02T15:04:05Z           RFC 3339, with any offset
 //	now
+//
+// A local time the zone skips, such as 02:30 on a spring-forward morning, is
+// an error. Shifting it to a nearby hour would record a different instant
+// from the one that was typed.
 func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -43,9 +47,18 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		return inRange(t, now)
 	}
 	for _, layout := range absoluteLayouts {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			return inRange(t, now)
+		nominal, err := time.Parse(layout, s)
+		if err != nil {
+			continue
 		}
+		t, err := time.ParseInLocation(layout, s, loc)
+		if err != nil {
+			continue
+		}
+		if !sameCivil(nominal, t) {
+			return time.Time{}, fmt.Errorf("%s doesn't exist in %s", s, loc)
+		}
+		return inRange(t, now)
 	}
 	for _, layout := range []string{"15:04:05", "15:04"} {
 		c, err := time.Parse(layout, s)
@@ -53,9 +66,17 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 			continue
 		}
 		n := now.In(loc)
-		t := time.Date(n.Year(), n.Month(), n.Day(), c.Hour(), c.Minute(), c.Second(), 0, loc)
+		t, ok := civilTime(n.Year(), n.Month(), n.Day(), c.Hour(), c.Minute(), c.Second(), loc)
+		if !ok {
+			return time.Time{}, missingCivil(s, n.Year(), n.Month(), n.Day(), loc)
+		}
 		if t.After(n) {
-			t = t.AddDate(0, 0, -1)
+			// Previous calendar date, independent of the zone's offset.
+			prev := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+			t, ok = civilTime(prev.Year(), prev.Month(), prev.Day(), c.Hour(), c.Minute(), c.Second(), loc)
+			if !ok {
+				return time.Time{}, missingCivil(s, prev.Year(), prev.Month(), prev.Day(), loc)
+			}
 		}
 		return t, nil
 	}
@@ -82,6 +103,28 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		return now.Add(d), nil
 	}
 	return now.Add(-d), nil
+}
+
+// sameCivil reports whether local has the calendar fields parse read.
+// A daylight-saving gap fails the check: the parsed time is a different hour
+// (or day) from the one in the input.
+func sameCivil(nominal, local time.Time) bool {
+	return nominal.Year() == local.Year() && nominal.Month() == local.Month() && nominal.Day() == local.Day() &&
+		nominal.Hour() == local.Hour() && nominal.Minute() == local.Minute() && nominal.Second() == local.Second()
+}
+
+// civilTime builds a local time and reports whether that clock time exists.
+// time.Date normalizes a skipped hour to a different one and still succeeds.
+func civilTime(year int, month time.Month, day, hour, min, sec int, loc *time.Location) (time.Time, bool) {
+	t := time.Date(year, month, day, hour, min, sec, 0, loc)
+	if t.Year() != year || t.Month() != month || t.Day() != day || t.Hour() != hour || t.Minute() != min || t.Second() != sec {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func missingCivil(input string, year int, month time.Month, day int, loc *time.Location) error {
+	return fmt.Errorf("%s doesn't exist on %04d-%02d-%02d in %s", input, year, int(month), day, loc)
 }
 
 // trimAgo drops a trailing "ago" in any case. The rest of parsing is

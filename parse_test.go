@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	_ "time/tzdata"
 )
 
 func TestParseWhen(t *testing.T) {
@@ -92,6 +94,54 @@ func TestParseWhenTooFar(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "more than 200 years from now") {
 			t.Errorf("parseWhen(%q) error = %v, want a too-far error", in, err)
 		}
+	}
+}
+
+func TestParseWhenDSTGap(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2026-03-08 is the US spring-forward: 02:00–03:00 does not exist.
+	// 2026-11-01 is the fall-back: 01:30 happens twice and must still parse.
+	spring := time.Date(2026, 3, 8, 10, 0, 0, 0, loc)
+	for _, in := range []string{"02:30", "02:30:00", "2026-03-08 02:30", "2026-03-08T02:30:00"} {
+		_, err := parseWhen(in, spring, loc)
+		if err == nil || !strings.Contains(err.Error(), "doesn't exist") {
+			t.Errorf("parseWhen(%q) error = %v, want a skipped-time error", in, err)
+		}
+	}
+
+	got, err := parseWhen("03:30", spring, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 3, 8, 3, 30, 0, 0, loc)
+	if !got.Equal(want) || got.Hour() != 3 {
+		t.Errorf("03:30 = %v, want %v", got, want)
+	}
+
+	// 02:30 today exists but is still ahead, so it means yesterday — which
+	// is the gap. That has to fail too, not land on 01:30 the day before.
+	early := time.Date(2026, 3, 9, 1, 0, 0, 0, loc)
+	if _, err := parseWhen("02:30", early, loc); err == nil || !strings.Contains(err.Error(), "2026-03-08") {
+		t.Errorf("yesterday gap error = %v", err)
+	}
+
+	fall := time.Date(2026, 11, 1, 10, 0, 0, 0, loc)
+	got, err = parseWhen("01:30", fall, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Hour() != 1 || got.Minute() != 30 || got.Day() != 1 {
+		t.Errorf("ambiguous 01:30 = %v", got)
+	}
+	got, err = parseWhen("2026-11-01 01:30:00", fall, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Hour() != 1 || got.Minute() != 30 {
+		t.Errorf("ambiguous absolute 01:30 = %v", got)
 	}
 }
 
