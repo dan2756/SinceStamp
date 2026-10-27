@@ -79,6 +79,19 @@ func validName(name string) error {
 	return nil
 }
 
+func validNote(note string) error {
+	if strings.ContainsAny(note, "\t\r\n") {
+		return usagef("note can't contain tabs or newlines")
+	}
+	return nil
+}
+
+// flatNote keeps a hand-edited note on one log line. New marks are rejected
+// by validNote; a file edited by hand can still contain a break.
+func flatNote(note string) string {
+	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(note)
+}
+
 func notFound(name string) error {
 	return fmt.Errorf("no event named %q (see 'since ls')", name)
 }
@@ -141,6 +154,9 @@ func (a *app) cmdMark(o options, args []string) error {
 	}
 	name := args[0]
 	if err := validName(name); err != nil {
+		return err
+	}
+	if err := validNote(o.note); err != nil {
 		return err
 	}
 	now := a.now()
@@ -323,9 +339,13 @@ func (a *app) cmdLog(o options, args []string) error {
 			line += "  " + cells[i] + strings.Repeat(" ", width-len(cells[i]))
 		}
 		if m.Note != "" {
-			line += "  " + m.Note
+			line += "  " + flatNote(m.Note)
+		} else {
+			// The first row's interval cell is empty, so drop that padding
+			// without touching a note that ends in spaces.
+			line = strings.TrimRight(line, " ")
 		}
-		fmt.Fprintln(a.stdout, strings.TrimRight(line, " "))
+		fmt.Fprintln(a.stdout, line)
 	}
 	return nil
 }

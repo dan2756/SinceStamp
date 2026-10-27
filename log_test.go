@@ -182,6 +182,58 @@ func TestFarApartMarksKeepRealInterval(t *testing.T) {
 	}
 }
 
+func TestLogPreservesNoteText(t *testing.T) {
+	ta := newTestApp(t)
+	ta.must("mark", "coffee", "--at", "2h", "--note", "keep ")
+	ta.must("mark", "coffee")
+	got := ta.must("log", "coffee")
+	var kept string
+	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		if strings.Contains(line, "07:12") {
+			kept = line
+		}
+	}
+	if !strings.HasSuffix(kept, "keep ") {
+		t.Fatalf("trailing space was dropped: %q\nlog:\n%s", kept, got)
+	}
+}
+
+func TestMarkRejectsNoteBreaks(t *testing.T) {
+	ta := newTestApp(t)
+	for _, note := range []string{"line1\nline2", "a\tb", "cr\rhere"} {
+		code, out := ta.run("mark", "coffee", "--note", note)
+		if code != 2 || out != "" || !strings.Contains(ta.stderr.String(), "note can't contain") {
+			t.Fatalf("note %q: exit %d stdout %q stderr %s", note, code, out, ta.stderr.String())
+		}
+	}
+	if code, _ := ta.run("coffee"); code != 1 {
+		t.Fatal("rejected note was recorded")
+	}
+}
+
+func TestLogFlattensHandEditedNoteBreaks(t *testing.T) {
+	ta := newTestApp(t)
+	s, err := ta.app.store()
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 1, 5, 14, 12, 0, 0, time.UTC)
+	err = s.Save(&Data{Version: 1, Events: map[string]*Event{
+		"coffee": {Count: 1, Marks: []Mark{{At: at, Note: "line1\nline2"}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ta.must("log", "coffee")
+	if strings.Count(got, "\n") != 2 || !strings.Contains(got, "line1 line2") {
+		t.Fatalf("log:\n%s", got)
+	}
+	js := ta.must("log", "coffee", "--json")
+	if !strings.Contains(js, `"note": "line1\nline2"`) {
+		t.Fatalf("json should keep the break escaped:\n%s", js)
+	}
+}
+
 func TestLogSecondsAndShort(t *testing.T) {
 	ta := newTestApp(t)
 	ta.clock = time.Date(2026, 1, 5, 11, 26, 0, 0, testZone)
