@@ -153,11 +153,11 @@ func (s *Store) Load() (*Data, error) {
 // symlink, the file it points to is replaced rather than the link, and an
 // existing file keeps its permissions.
 func (s *Store) Save(d *Data) (err error) {
-	b, err := json.MarshalIndent(d, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	if err := writeIndentJSON(&buf, d); err != nil {
 		return err
 	}
-	b = append(b, '\n')
+	b := buf.Bytes()
 
 	path, err := resolveLinks(s.Path)
 	if err != nil {

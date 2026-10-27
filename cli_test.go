@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -190,6 +191,33 @@ func TestShowJSON(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %v\nwant %v", got, want)
+	}
+}
+
+func TestJSONPreservesReservedCharacters(t *testing.T) {
+	ta := newTestApp(t)
+	out := ta.must("mark", "R&D", "--note", "fish & chips <fresh>", "--json")
+	for _, esc := range []string{`\u0026`, `\u003c`, `\u003e`} {
+		if strings.Contains(out, esc) {
+			t.Fatalf("JSON escaped HTML (%s):\n%s", esc, out)
+		}
+	}
+	if !strings.Contains(out, `"name": "R&D"`) || !strings.Contains(out, `"note": "fish & chips <fresh>"`) {
+		t.Fatalf("JSON = %s", out)
+	}
+	s, err := ta.app.store()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `\u0026`) || strings.Contains(string(b), `\u003c`) {
+		t.Fatalf("events file escaped HTML:\n%s", b)
+	}
+	if show := ta.must("show", "R&D", "--json"); show != out {
+		t.Fatalf("show:\n%s\nmark:\n%s", show, out)
 	}
 }
 

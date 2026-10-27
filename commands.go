@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -122,7 +123,14 @@ func (a *app) summary(name string, e *Event, now time.Time) eventJSON {
 }
 
 func (a *app) writeJSON(v any) error {
-	enc := json.NewEncoder(a.stdout)
+	return writeIndentJSON(a.stdout, v)
+}
+
+// writeIndentJSON prints indented JSON without HTML escaping, so a name or
+// note like "R&D" or "a < b" is stored and printed as itself.
+func writeIndentJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
