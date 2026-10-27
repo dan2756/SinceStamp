@@ -308,6 +308,27 @@ func TestFutureEvents(t *testing.T) {
 	}
 }
 
+func TestMarkDSTGapIsUsageError(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ta := newTestApp(t)
+	ta.app.loc = loc
+	ta.clock = time.Date(2026, 3, 8, 10, 0, 0, 0, loc)
+
+	code, out := ta.run("mark", "coffee", "--at", "02:30")
+	if code != 2 {
+		t.Fatalf("exit %d, want 2; stderr %s", code, ta.stderr.String())
+	}
+	if out != "" || !strings.Contains(ta.stderr.String(), "doesn't exist") {
+		t.Fatalf("stdout %q stderr %s", out, ta.stderr.String())
+	}
+	if code, _ := ta.run("coffee"); code != 1 {
+		t.Fatal("a skipped clock time was recorded")
+	}
+}
+
 func TestShowPrecise(t *testing.T) {
 	ta := newTestApp(t)
 	ta.must("mark", "coffee")

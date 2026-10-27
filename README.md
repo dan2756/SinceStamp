@@ -64,7 +64,9 @@ Flags can go anywhere on the command line: `since --json coffee` and
 
 Units are `s`, `m`, `h`, `d`, `w` and `y` (365 days), or spelled out (`min`,
 `hours`, `weeks`, ...). Decimals work: `1.5h`. Times more than 200 years
-before or after now are rejected.
+before or after now are rejected. A local time that daylight saving skips
+(for example 02:30 on a spring-forward morning) is rejected instead of being
+moved to a different hour.
 
 ### How durations read
 
