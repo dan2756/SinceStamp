@@ -413,6 +413,52 @@ func TestStdoutWriteErrorFails(t *testing.T) {
 	}
 }
 
+// A full history used to accept a backdated mark, bump the count, and then
+// trim that mark away, so the note never reached the file.
+func TestMarkOlderThanKeptHistoryIsRefused(t *testing.T) {
+	ta := newTestApp(t)
+	s, err := ta.app.store()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.Update(func(d *Data) error {
+		for i := range maxMarks {
+			note := ""
+			if i == 0 {
+				note = "oldest"
+			}
+			at := ta.clock.Add(time.Duration(i-maxMarks) * time.Hour).UTC()
+			d.Mark("coffee", Mark{At: at, Note: note})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := ta.run("mark", "coffee", "--at", "101h", "--note", "ancient")
+	if code != 1 || out != "" {
+		t.Fatalf("exit %d, stdout %q, want 1 and no stdout; stderr %s", code, out, ta.stderr.String())
+	}
+	if !strings.Contains(ta.stderr.String(), "older than the latest 100 marks") || strings.Contains(ta.stderr.String(), "--help") {
+		t.Fatalf("stderr = %q", ta.stderr.String())
+	}
+	got := ta.must("log", "coffee")
+	if !strings.Contains(got, "coffee: 100 marks") || strings.Contains(got, "ancient") || !strings.Contains(got, "oldest") {
+		t.Fatalf("history changed after a refused mark:\n%s", got)
+	}
+
+	// The same instant as the oldest kept mark still fits: it is inserted
+	// after that mark, and the previous one is the entry that drops off.
+	if got, want := ta.must("mark", "coffee", "--at", "100h", "--note", "same"), "marked coffee (Thu Jan 1 05:12)\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	got = ta.must("log", "coffee")
+	if !strings.Contains(got, "101 marks (showing the last 100)") || !strings.Contains(got, "same") || strings.Contains(got, "oldest") {
+		t.Fatalf("boundary mark:\n%s", got)
+	}
+}
+
 func TestListAlignsWideNames(t *testing.T) {
 	ta := newTestApp(t)
 	ta.must("mark", "x", "--at", "2h")

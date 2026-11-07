@@ -37,8 +37,9 @@ Flags:
   -h, --help         show this help
   --version          print the version
 
-The last 100 marks of each event are kept. Exit status is 1 when an event
-doesn't exist or something else fails, and 2 for usage errors.
+The last 100 marks of each event are kept; a mark older than those is
+refused. Exit status is 1 when an event doesn't exist or something else
+fails, and 2 for usage errors.
 
 Events are stored in $SINCE_FILE, or $XDG_DATA_HOME/since/events.json
 (default ~/.local/share/since/events.json).
