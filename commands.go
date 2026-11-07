@@ -180,6 +180,12 @@ func (a *app) cmdMark(o options, args []string) error {
 			prev = &p
 		}
 		ev = *d.Mark(name, m)
+		// History keeps the newest maxMarks. A backdated mark older than all
+		// of them is trimmed straight away, so the note never lands in the
+		// file. Refuse it instead of reporting a mark that was not stored.
+		if !slices.ContainsFunc(ev.Marks, func(x Mark) bool { return x.At.Equal(m.At) }) {
+			return fmt.Errorf("%s is older than the latest %d marks of %q", a.when(m.At, now), maxMarks, name)
+		}
 		return nil
 	})
 	if err != nil {

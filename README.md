@@ -152,14 +152,16 @@ are no events). `since log NAME --json` adds the history:
 recorded, so a backdated mark shows its own time and note.
 
 `last` and `at` are RFC 3339 in your local time zone. `count` is every mark
-ever recorded; the history keeps the last 100 marks per event.
+ever recorded; the history keeps the last 100 marks per event. A new mark
+older than those is refused, so it is not stored and does not increase the
+count.
 
 ## Exit codes
 
 | Code | Meaning                                                        |
 |------|----------------------------------------------------------------|
 | 0    | success                                                        |
-| 1    | the event doesn't exist, the target of a rename is taken, reading/writing the events file failed, or the output couldn't be written |
+| 1    | the event doesn't exist, the target of a rename is taken, a mark is older than the history kept for that event, reading/writing the events file failed, or the output couldn't be written |
 | 2    | usage error: unknown flag, missing argument, unparseable `--at` |
 
 ## Storage
